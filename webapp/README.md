@@ -11,7 +11,7 @@ pip install fastapi uvicorn pydantic
 
 ## How to Run
 
-### Method 1: Using the provided `bat` scripts (Windows)
+### Method 1: Using the provided `bat` scripts (Windows).
 1. Double click **`run_backend.bat`**. This will start the FastAPI server on `http://localhost:8000`. Keep this terminal window open.
 2. Double click **`run_frontend.bat`**. This will start a local HTTP server for the frontend on `http://localhost:8080` and you can open it in your browser.
 
