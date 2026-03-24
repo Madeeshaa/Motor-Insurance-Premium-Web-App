@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Motor Insurance Premium Calculator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+
+    <div class="app-container">
+        <header class="app-header">
+            <h1 class="app-title"><i data-lucide="shield-check" class="icon-xl"></i> Motor Insurance Pricing</h1>
+            <p class="app-subtitle">Hybrid Neuro-Fuzzy (ANFIS) + GLM Model powered by PyTorch</p>
+        </header>
+
+        <div class="main-grid">
+            <!-- Input Form Section -->
+            <section class="glass-panel form-section">
+                <div class="section-badge">
+                    <i data-lucide="sliders-horizontal"></i>
+                    <span>Parameters</span>
+                </div>
+
+                <form id="premium-form">
+                    <div class="input-group">
+                        <label for="birth_date">Date of Birth</label>
+                        <input type="date" id="birth_date" name="birth_date" value="1988-06-15" required>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="exp">Driving Experience (yrs)</label>
+                        <input type="number" id="exp" name="exp" min="0" max="60" value="15" required>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="matriculation_year">Matriculation Year</label>
+                        <input type="number" id="matriculation_year" name="matriculation_year" min="1970" max="2026" value="2017" required>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="vehicle_value">Market Value (€)</label>
+                        <input type="number" id="vehicle_value" name="vehicle_value" min="500" max="200000" value="18000" step="500" required>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="cc">Engine CC</label>
+                        <input type="number" id="cc" name="cc" min="600" max="4000" value="1600" step="50" required>
+                    </div>
+                    
+                    <div class="divider"></div>
+
+                    <div class="input-group">
+                        <div class="slider-header">
+                            <label for="loading">Premium Loading</label>
+                            <span id="loading-val" class="slider-val">20%</span>
+                        </div>
+                        <input type="range" id="loading" name="loading" min="0" max="100" value="20">
+                    </div>
+
+                    <button type="submit" class="btn-primary" id="calc-btn">
+                        <i data-lucide="calculator"></i>
+                        <span>Calculate Premium</span>
+                        <div class="spinner hidden" id="spinner"></div>
+                    </button>
+                    
+                    <div id="error-message" class="error-msg hidden"></div>
+                </form>
+            </section>
+
+            <!-- Results Section -->
+            <section class="glass-panel result-section">
+                <div class="section-badge highlight-badge">
+                    <i data-lucide="bar-chart-3"></i>
+                    <span>Actuarial Output</span>
+                </div>
+
+                <!-- Initial Empty State -->
+                <div id="empty-state" class="empty-state">
+                    <i data-lucide="mouse-pointer-click" class="icon-empty"></i>
+                    <p>Enter policy details and calculate to see the premium breakdown.</p>
+                </div>
+
+                <!-- Results State -->
+                <div id="results-content" class="results-content hidden">
+                    
+                    <!-- Main Premium Cards -->
+                    <div class="premium-cards">
+                        <div class="p-card pd-pure">
+                            <span class="p-label">Pure Premium</span>
+                            <div class="p-value" id="res-pure-premium">€0.00</div>
+                            <span class="p-desc">Expected Risk Cost</span>
+                        </div>
+                        
+                        <div class="p-card pd-final">
+                            <span class="p-label">Final Premium</span>
+                            <div class="p-value highlight-text" id="res-final-premium">€0.00</div>
+                            <span class="p-desc">Including <span id="res-loading-pct">20</span>% loading</span>
+                        </div>
+                    </div>
+
+                    <div class="divider"></div>
+
+                    <!-- Risk Indicator -->
+                    <div class="risk-badge" id="risk-badge">
+                        <span id="risk-icon-container">
+                            <i data-lucide="activity"></i>
+                        </span>
+                        <div class="risk-text">
+                            <div class="risk-label" id="res-risk-tier">MEDIUM RISK</div>
+                            <div class="risk-sub">~<span id="res-risk-ratio">1.2</span>x portfolio avg</div>
+                        </div>
+                    </div>
+
+                    <!-- Breakdown Details -->
+                    <div class="breakdown-grid">
+                        <div class="breakdown-item">
+                            <span class="b-key">GLM Component</span>
+                            <span class="b-val" id="res-glm-pp">€0.00</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="b-key">ANFIS Component</span>
+                            <span class="b-val" id="res-nf-pp">€0.00</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="b-key">GLM Frequency</span>
+                            <span class="b-val light-text" id="res-glm-freq">0 freq/yr</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="b-key">ANFIS Frequency</span>
+                            <span class="b-val light-text" id="res-nf-freq">0 freq/yr</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="b-key">Portfolio Avg PP</span>
+                            <span class="b-val light-text" id="res-portfolio-avg">€0.00</span>
+                        </div>
+                        <div class="breakdown-item highlight-item">
+                            <span class="b-key">Loading Amount</span>
+                            <span class="b-val" id="res-loading-amt">€0.00</span>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
