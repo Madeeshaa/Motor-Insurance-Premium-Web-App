@@ -176,6 +176,34 @@ def build_stack_features_v2(glm_freq_v, glm_sev_v, glm_pp_v, nf_freq_v, nf_sev_v
         raw_feat,
     ])
 
+import itertools
+
+TERMS = {
+    "age": ["Young","Adult","Senior"],
+    "exp": ["Novice","Average","Expert"],
+    "va":  ["New","Mid","Old"],
+    "val": ["Budget","Mid","Luxury"],
+    "cc":  ["Small","Medium","High"],
+}
+KEYS = list(TERMS.keys())
+ALL_COMBOS = list(itertools.product(*[TERMS[k] for k in KEYS]))
+
+@torch.no_grad()
+def get_rule_info(X_np):
+    Xn = (X_np - X_mean) / X_std
+    xt = torch.tensor(Xn, dtype=torch.float32, device=DEVICE)
+    m = model_nf.fuzz(xt)
+    w = model_nf._rule_weights(m)
+    best_idx = int(torch.argmax(w, dim=1)[0])
+    best_weight = float(w[0, best_idx])
+    
+    # Calculate inherent risk multiplier for this rule natively from trained parameters
+    rule_bias_f = float(model_nf.rule_bias_freq[best_idx])
+    rule_bias_s = float(model_nf.rule_bias_sev[best_idx])
+    rule_score = float(np.exp(rule_bias_f + rule_bias_s))
+    
+    return "-".join(ALL_COMBOS[best_idx]), best_weight, rule_score
+
 def _compute_eng_features(age, exp, v_age, v_value, cc):
     log_val      = np.log1p(max(v_value, 0))
     age_exp_r    = age / (exp + 1)
