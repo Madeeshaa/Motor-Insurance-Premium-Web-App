@@ -74,20 +74,16 @@ python premium_app_script.py
 *(Note: A highly calibrated production version is already serialized into `saved_models.joblib`)*
 
 ### 3. Launching the Underwriter App
-To spin up the web interface:
+The system is designed to run easily straight out of the box. Once you've downloaded the repository:
+
+1. **Start the Backend:** First, spin up the backend inference server:
 ```bash
-python app.py
+python webapp/backend.py
 ```
-Once booted, navigate to `http://localhost:5000` (or the port specified by your terminal) in your browser to start generating actuarial quotes.
+*(Check your exact backend filename if using app.py instead).*
 
----
+2. **Start the Frontend:** Next, simply open `webapp/index.html` in any modern web browser or run it via a local live server to interact with the UI.
 
-## 🤝 Contributing
-Contributions are always welcome. To propose enhancements:
-1. Fork the repo and create your branch (`git checkout -b feature/AmazingActuarialFeature`)
-2. Commit your modifications (`git commit -m 'Add detailed claim simulations'`)
-3. Push to the branch (`git push origin feature/AmazingActuarialFeature`)
-4. Open a Pull Request
 
 ## 📜 License
 This software is provided for academic, research, and non-commercial actuarial development.
