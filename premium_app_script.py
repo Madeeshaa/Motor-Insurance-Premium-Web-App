@@ -248,15 +248,23 @@ X_std  = X_raw.std(axis=0) + 1e-9
 X  = (X_raw  - X_mean) / X_std
 Xs = (Xs_raw - X_mean) / X_std
 
-X_t     = torch.tensor(X,      dtype=torch.float32)
-yN_t    = torch.tensor(yN,     dtype=torch.float32)
-Xs_t    = torch.tensor(Xs,     dtype=torch.float32)
-ySlog_t = torch.tensor(yS_log, dtype=torch.float32)
+X_tf_tr, X_tf_v, yN_tr, yN_v = train_test_split(X, yN, test_size=0.15, random_state=42)
+X_ts_tr, X_ts_v, yS_tr, yS_v = train_test_split(Xs, yS_log, test_size=0.15, random_state=42)
+
+X_t     = torch.tensor(X_tf_tr, dtype=torch.float32)
+yN_t    = torch.tensor(yN_tr, dtype=torch.float32)
+X_v_f   = torch.tensor(X_tf_v, dtype=torch.float32).to(DEVICE)
+yN_v_t  = torch.tensor(yN_v, dtype=torch.float32).to(DEVICE)
+
+Xs_t    = torch.tensor(X_ts_tr, dtype=torch.float32)
+ySlog_t = torch.tensor(yS_tr, dtype=torch.float32)
+X_v_s   = torch.tensor(X_ts_v, dtype=torch.float32).to(DEVICE)
+yS_v_t  = torch.tensor(yS_v, dtype=torch.float32).to(DEVICE)
 
 BATCH_FREQ = 1024; BATCH_SEV = 512
 freq_loader = DataLoader(TensorDataset(X_t, yN_t),   batch_size=BATCH_FREQ, shuffle=True)
 sev_loader  = DataLoader(TensorDataset(Xs_t,ySlog_t), batch_size=BATCH_SEV,  shuffle=True)
-print(f"Freq: {len(X_t):,} rows | Sev: {len(Xs_t):,} rows")
+print(f"Freq: {len(X_t):,} train rows | Sev: {len(Xs_t):,} train rows")
 
 
 class GaussianMF(nn.Module):
@@ -363,7 +371,7 @@ opt      = torch.optim.AdamW(model_nf.parameters(), lr=LR, weight_decay=WEIGHT_D
 sched    = CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=LR*0.05)
 
 print(f"\nTraining ANFIS: {EPOCHS} epochs, rank_weight={RANK_WEIGHT}")
-best_fl = float("inf"); patience_counter = 0; history = []; t0 = time.time()
+best_val = float("inf"); patience_counter = 0; history_nf = []; t0 = time.time()
 
 for ep in range(1, EPOCHS+1):
     model_nf.train()
@@ -380,6 +388,7 @@ for ep in range(1, EPOCHS+1):
         if not torch.isnan(loss):
             loss.backward(); torch.nn.utils.clip_grad_norm_(model_nf.parameters(), 2.0)
             opt.step(); fl_list.append(loss.item())
+            
     for xb, yb_log in sev_loader:
         xb, yb_log = xb.to(DEVICE), yb_log.to(DEVICE)
         opt.zero_grad()
@@ -391,13 +400,29 @@ for ep in range(1, EPOCHS+1):
         if not torch.isnan(loss):
             loss.backward(); torch.nn.utils.clip_grad_norm_(model_nf.parameters(), 2.0)
             opt.step(); sl_list.append(loss.item())
+            
     sched.step()
+    
+    model_nf.eval()
+    with torch.no_grad():
+        val_log_lam, _ = model_nf(X_v_f)
+        v_lam = F.softplus(val_log_lam)
+        val_f_loss = F.poisson_nll_loss(v_lam, yN_v_t, log_input=False, full=False, reduction="mean") + RANK_WEIGHT * pairwise_ranking_loss(v_lam, yN_v_t)
+        
+        _, val_log_sev = model_nf(X_v_s)
+        val_s_loss = F.smooth_l1_loss(val_log_sev, yS_v_t, beta=1.0) + RANK_WEIGHT * pairwise_ranking_loss(val_log_sev, yS_v_t)
+        
     fl = float(np.mean(fl_list)) if fl_list else float("nan")
     sl = float(np.mean(sl_list)) if sl_list else float("nan")
-    history.append({"epoch": ep, "freq_loss": fl, "sev_loss": sl})
+    v_fl = float(val_f_loss.item())
+    v_sl = float(val_s_loss.item())
+    val_total = v_fl + v_sl
+    
+    history_nf.append({"epoch": ep, "train_loss": fl+sl, "val_loss": val_total})
     if ep % 10 == 0 or ep == 1:
-        print(f"  Ep {ep:03d}/{EPOCHS} | freq={fl:.5f} | sev={sl:.5f} | {time.time()-t0:.0f}s")
-    if fl < best_fl - 1e-6: best_fl = fl; patience_counter = 0
+        print(f"  Ep {ep:03d}/{EPOCHS} | T-loss={fl+sl:.4f} | V-loss={val_total:.4f} | {time.time()-t0:.0f}s")
+        
+    if val_total < best_val - 1e-4: best_val = val_total; patience_counter = 0
     else: patience_counter += 1
     if patience_counter >= PATIENCE:
         print(f"  Early stop at ep {ep} (patience={PATIENCE})"); break
@@ -548,14 +573,17 @@ mlp_stacker = MLPStacker(IN_DIM).to(DEVICE)
 opt_mlp = torch.optim.AdamW(mlp_stacker.parameters(), lr=3e-4, weight_decay=1e-3)
 sched_mlp = CosineAnnealingLR(opt_mlp, T_max=120, eta_min=3e-6)
 
-Xs_nn  = torch.tensor(oof_stack_Xn, dtype=torch.float32)
-# Use log1p target: prevents zero-claim dominance, aligns with ranking objective
-ys_raw_log = np.log1p(np.clip(obs_v, 0, None))
-ys_nn  = torch.tensor(ys_raw_log, dtype=torch.float32)
+Xs_nn_tr, Xs_nn_val, ys_nn_tr, ys_nn_val = train_test_split(oof_stack_Xn, ys_raw_log, test_size=0.15, random_state=42)
+Xs_nn = torch.tensor(Xs_nn_tr, dtype=torch.float32)
+ys_nn = torch.tensor(ys_nn_tr, dtype=torch.float32)
+Xs_nn_v = torch.tensor(Xs_nn_val, dtype=torch.float32).to(DEVICE)
+ys_nn_v = torch.tensor(ys_nn_val, dtype=torch.float32).to(DEVICE)
+
 ds_nn  = TensorDataset(Xs_nn, ys_nn)
 dl_nn  = DataLoader(ds_nn, batch_size=512, shuffle=True)
 
-MLP_EPOCHS = 150; RANK_W_MLP = 0.50; best_mlp = float("inf"); pat_mlp = 0
+MLP_EPOCHS = 150; RANK_W_MLP = 0.50; best_mlp_val = float("inf"); pat_mlp = 0
+history_mlp = []
 t1 = time.time()
 for ep in range(1, MLP_EPOCHS+1):
     mlp_stacker.train()
@@ -563,18 +591,26 @@ for ep in range(1, MLP_EPOCHS+1):
     for xb, yb in dl_nn:
         xb, yb = xb.to(DEVICE), yb.to(DEVICE)
         opt_mlp.zero_grad()
-        pred = mlp_stacker(xb)  # raw logit
-        # Smooth-L1 on log1p scale + strong ranking loss
+        pred = mlp_stacker(xb)
         loss = (F.smooth_l1_loss(pred, yb, beta=0.5)
                 + RANK_W_MLP * pairwise_ranking_loss(pred, yb, n_pairs=1024))
         if not torch.isnan(loss):
             loss.backward(); torch.nn.utils.clip_grad_norm_(mlp_stacker.parameters(), 2.0)
             opt_mlp.step(); ep_losses.append(loss.item())
     sched_mlp.step()
+    
+    mlp_stacker.eval()
+    with torch.no_grad():
+        v_pred = mlp_stacker(Xs_nn_v)
+        v_loss = F.smooth_l1_loss(v_pred, ys_nn_v, beta=0.5) + RANK_W_MLP * pairwise_ranking_loss(v_pred, ys_nn_v, n_pairs=1024)
+        
     el = float(np.mean(ep_losses)) if ep_losses else float("nan")
+    vl = float(v_loss.item())
+    history_mlp.append({"epoch": ep, "train_loss": el, "val_loss": vl})
+    
     if ep % 20 == 0 or ep == 1:
-        print(f"  MLP ep {ep:03d}/{MLP_EPOCHS} | loss={el:.3f} | {time.time()-t1:.0f}s")
-    if el < best_mlp - 0.001: best_mlp = el; pat_mlp = 0
+        print(f"  MLP ep {ep:03d}/{MLP_EPOCHS} | T-loss={el:.3f} | V-loss={vl:.3f} | {time.time()-t1:.0f}s")
+    if vl < best_mlp_val - 0.001: best_mlp_val = vl; pat_mlp = 0
     else: pat_mlp += 1
     if pat_mlp >= 30:
         print(f"  MLP early stop at ep {ep}"); break
@@ -803,13 +839,50 @@ save_bundle = {
     "formula_sev": formula_sev,
 }
 joblib.dump(save_bundle, MODEL_SAVE_PATH)
-print(f"Models saved -> {MODEL_SAVE_PATH}")
+# =============================================================================
+# SECTION 9 - OVERFITTING ANALYSIS (LEARNING CURVES)
+# =============================================================================
+print("\n" + "=" * 70)
+print("SECTION 9 - PLOTTING LEARNING CURVES")
+print("=" * 70)
+import matplotlib.pyplot as plt
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+# ANFIS
+anfis_eps = [h["epoch"] for h in history_nf]
+ax1.plot(anfis_eps, [h["train_loss"] for h in history_nf], label="Train Loss", color="blue")
+ax1.plot(anfis_eps, [h["val_loss"] for h in history_nf], label="Validation Loss", color="red", linestyle="--")
+ax1.set_title("ANFIS Learning Curve")
+ax1.set_xlabel("Epochs")
+ax1.set_ylabel("Combined Loss")
+ax1.grid(True, alpha=0.3)
+ax1.legend()
+
+# MLP
+mlp_eps = [h["epoch"] for h in history_mlp]
+ax2.plot(mlp_eps, [h["train_loss"] for h in history_mlp], label="Train Loss", color="blue")
+ax2.plot(mlp_eps, [h["val_loss"] for h in history_mlp], label="Validation Loss", color="red", linestyle="--")
+ax2.set_title("MLP Stacker Learning Curve")
+ax2.set_xlabel("Epochs")
+ax2.set_ylabel("Loss")
+ax2.grid(True, alpha=0.3)
+ax2.legend()
+
+plt.tight_layout()
+plt.savefig("learning_curves.png", dpi=150)
+print("Learning curves saved -> learning_curves.png")
+
+print("=" * 70)
+print(f"Results saved to -> {COMPARE_CSV}")
+if MODEL_PATH:
+    print(f"Models saved to -> {MODEL_PATH}")
+print("PIPELINE COMPLETE.")
 
 # =============================================================================
-# SECTION 9 - FINAL SUMMARY
+# SECTION 10 - FINAL SUMMARY
 # =============================================================================
 print("\n" + "="*70)
-print("SECTION 9 - FINAL REPORT SUMMARY")
+print("SECTION 10 - FINAL REPORT SUMMARY")
 print("="*70)
 
 best_row = results_df.iloc[0]
