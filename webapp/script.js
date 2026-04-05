@@ -104,6 +104,10 @@ function displayResults(data, loadingPct) {
     riskTier.textContent = data.risk.label;
     document.getElementById('res-risk-ratio').textContent = data.risk.ratio.toFixed(2);
     
+    // Fuzzy Rule Output
+    const ruleWeightPct = (data.risk.rule_weight * 100).toFixed(1);
+    document.getElementById('res-risk-rule').innerHTML = `<b>Rule:</b> ${data.risk.rule_name} <i>(${ruleWeightPct}% match)</i>`;
+    
     // Breakdown
     document.getElementById('res-glm-pp').textContent = formatEur(data.breakdown.glm_pp);
     document.getElementById('res-nf-pp').textContent = formatEur(data.breakdown.nf_pp);

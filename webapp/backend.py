@@ -47,14 +47,15 @@ def predict_premium(req: PremiumRequest):
         final_premium = pure_premium * (1 + loading_pct)
         loading_amount = final_premium - pure_premium
         
-        # Evaluate risk tier
-        obs_pp = inf.obs_pure_prem
-        ratio = pure_premium / (obs_pp + 1e-8)
+        # Get top fuzzy rule combination and its intrinsic risk score
+        x_base = __import__('numpy').array([[age, req.exp, v_age, req.vehicle_value, req.cc]], dtype=__import__('numpy').float32)
+        rule_name, rule_weight, rule_score = inf.get_rule_info(x_base)
         
-        if ratio < 0.75:
+        # Evaluate risk tier strictly from the active fuzzy rule's trained parametric constraints
+        if rule_score < 0.85:
             risk_tier = "low"
             risk_label = "LOW RISK"
-        elif ratio < 1.5:
+        elif rule_score < 1.15:
             risk_tier = "medium"
             risk_label = "MEDIUM RISK"
         else:
@@ -71,12 +72,14 @@ def predict_premium(req: PremiumRequest):
             "risk": {
                 "tier": risk_tier,
                 "label": risk_label,
-                "ratio": ratio
+                "ratio": rule_score,
+                "rule_name": rule_name,
+                "rule_weight": rule_weight
             },
             "breakdown": {
                 "glm_pp": glm_pp,
                 "nf_pp": nf_pp,
-                "portfolio_avg": obs_pp,
+                "portfolio_avg": inf.obs_pure_prem,
                 "glm_freq": glm_freq,
                 "nf_freq": nf_freq
             }
